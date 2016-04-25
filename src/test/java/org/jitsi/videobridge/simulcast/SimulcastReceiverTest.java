@@ -47,10 +47,6 @@ public class SimulcastReceiverTest
         VideoChannel mockVideoChannel
             = EasyMock.createMock(VideoChannel.class);
 
-        EasyMock.expect(mockVideoChannel.getRedPayloadType())
-            .andReturn(REDPT)
-            .anyTimes();
-
         EasyMock.expect(mockVideoChannel.getVP8PayloadType())
             .andReturn(VP8PT)
             .anyTimes();

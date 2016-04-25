@@ -17,6 +17,7 @@ package org.jitsi.videobridge.simulcast;
 
 import org.jitsi.impl.neomedia.*;
 import org.jitsi.impl.neomedia.codec.video.vp8.*;
+import org.jitsi.service.neomedia.codec.*;
 
 /**
  * The <tt>SimulcastStream</tt> of a <tt>SimulcastReceiver</tt> represents a
@@ -212,8 +213,14 @@ public class SimulcastStream
 
     public boolean isKeyFrame(RawPacket pkt)
     {
-        byte redPT = simulcastReceiver.getSimulcastEngine()
-            .getVideoChannel().getRedPayloadType();
+        byte redPT = simulcastReceiver
+            .getSimulcastEngine()
+            .getVideoChannel()
+            .getStream()
+            .getReceiveRtpParameters()
+            .getRtpCodecParameters(Constants.RED)
+            .getPayloadType();
+
         byte vp8PT = simulcastReceiver.getSimulcastEngine()
             .getVideoChannel().getVP8PayloadType();
         return Utils.isKeyFrame(pkt, redPT, vp8PT);

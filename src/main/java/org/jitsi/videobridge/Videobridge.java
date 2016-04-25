@@ -864,9 +864,8 @@ public class Videobridge
 
                             channel.setDirection(channelIQ.getDirection());
 
-                            channel.setSources(channelIQ.getSources());
-
-                            channel.setSourceGroups(
+                            channel.setSources(
+                                channelIQ.getSources(),
                                 channelIQ.getSourceGroups());
 
                             if (channel instanceof VideoChannel)

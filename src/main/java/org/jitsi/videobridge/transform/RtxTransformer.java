@@ -15,20 +15,22 @@
  */
 package org.jitsi.videobridge.transform;
 
-import java.util.*;
 import org.jitsi.impl.neomedia.*;
 import org.jitsi.impl.neomedia.transform.*;
 import org.jitsi.service.neomedia.*;
+import org.jitsi.service.neomedia.codec.*;
 import org.jitsi.util.*;
-import org.jitsi.videobridge.*;
+
+import java.util.*;
 
 /**
- * Intercepts RTX (RFC-4588) packets coming from an {@link RtpChannel}, and
+ * Intercepts RTX (RFC-4588) packets coming from a {@link MediaStream}, and
  * removes their RTX encapsulation.
  * Allows packets to be retransmitted to a channel (using the RTX format if
  * the destination supports it).
  *
  * @author Boris Grozev
+ * @author George Politis
  */
 public class RtxTransformer
     extends SinglePacketTransformerAdapter
@@ -41,9 +43,9 @@ public class RtxTransformer
     private static final Logger logger = Logger.getLogger(RtxTransformer.class);
 
     /**
-     * The <tt>RtpChannel</tt> for the transformer.
+     * The <tt>MediaStream</tt> for the transformer.
      */
-    private RtpChannel channel;
+    private final MediaStream mediaStream;
 
     /**
      * Maps an RTX SSRC to the last RTP sequence number sent with that SSRC.
@@ -54,13 +56,13 @@ public class RtxTransformer
      * Initializes a new <tt>RtxTransformer</tt> with a specific
      * <tt>RtpChannel</tt>.
      *
-     * @param channel the <tt>RtpChannel</tt> for the transformer.
+     * @param mediaStream the <tt>MediaStream</tt> for the transformer.
      */
-    RtxTransformer(RtpChannel channel)
+    RtxTransformer(MediaStream mediaStream)
     {
         super(RTPPacketPredicate.INSTANCE);
 
-        this.channel = channel;
+        this.mediaStream = mediaStream;
     }
 
     /**
@@ -85,7 +87,11 @@ public class RtxTransformer
      */
     private boolean isRtx(RawPacket pkt)
     {
-        byte rtxPt = channel.getRtxPayloadType();
+        byte rtxPt = mediaStream
+            .getRemoteEncodingParameters(pkt.getSSRC())
+            .getRtx()
+            .getPayloadType();
+
         return rtxPt != -1 && rtxPt == pkt.getPayloadType();
     }
 
@@ -111,10 +117,13 @@ public class RtxTransformer
             return null;
         }
 
-        long mediaSsrc = channel.getFidPairedSsrc(rtxSsrc);
-        if (mediaSsrc != -1)
+        RtpEncodingParameters rtpEncodingParameters = mediaStream
+            .getRemoteEncodingParameters(rtxSsrc);
+
+        if (rtpEncodingParameters != null)
         {
-            byte apt = channel.getRtxAssociatedPayloadType();
+            long mediaSsrc = rtpEncodingParameters.getSsrc();
+            byte apt = rtpEncodingParameters.getCodecPayloadType();
             if (apt != -1)
             {
                 int osn = pkt.getOriginalSequenceNumber();
@@ -123,8 +132,8 @@ public class RtxTransformer
                 byte[] buf = pkt.getBuffer();
                 int off = pkt.getOffset();
                 System.arraycopy(buf, off,
-                                 buf, off + 2,
-                                 pkt.getHeaderLength());
+                    buf, off + 2,
+                    pkt.getHeaderLength());
 
                 pkt.setOffset(off + 2);
                 pkt.setLength(pkt.getLength() - 2);
@@ -209,24 +218,7 @@ public class RtxTransformer
     }
 
     /**
-     * Tries to find an SSRC paired with {@code ssrc} in an FID group in one
-     * of the channels from {@link #channel}'s {@code Content}. Returns -1 on
-     * failure.
-     * @param ssrc the SSRC for which to find a paired SSRC.
-     * @return An SSRC paired with {@code ssrc} in an FID group, or -1.
-     */
-    private long getPairedSsrc(long ssrc)
-    {
-        RtpChannel sourceChannel
-                = channel.getContent().findChannelByFidSsrc(ssrc);
-        if (sourceChannel != null)
-        {
-            return sourceChannel.getFidPairedSsrc(ssrc);
-        }
-        return -1;
-    }
-    /**
-     * Retransmits a packet to {@link #channel}. If the destination supports
+     * Retransmits a packet to {@link #mediaStream}. If the destination supports
      * the RTX format, the packet will be encapsulated in RTX, otherwise, the
      * packet will be retransmitted as-is.
      *
@@ -239,17 +231,26 @@ public class RtxTransformer
      */
     public boolean retransmit(RawPacket pkt, TransformEngine after)
     {
-        boolean destinationSupportsRtx = channel.getRtxPayloadType() != -1;
+        mediaStream.getStreamRTPManager().
+        RtpCodecParameters mainCodec = mediaStream
+            .getReceiveRtpParameters()
+            .getRtpCodecParameters(Constants.VP8);
+
+        RtpEncodingParameters.RtxParameters rtxParameters = mediaStream
+            .getReceiveRtpParameters()
+            .getRtpEncodingParameters(mainCodec.getPayloadType())
+            .getRtx();
+
         boolean retransmitPlain;
 
-        if (destinationSupportsRtx)
+        if (rtxParameters != null)
         {
-            long rtxSsrc = getPairedSsrc(pkt.getSSRCAsLong());
+            long rtxSsrc = rtxParameters.getSsrc();
 
             if (rtxSsrc == -1)
             {
                 logger.warn("Cannot find SSRC for RTX, retransmitting plain. "
-                            + "SSRC=" + pkt.getSSRCAsLong());
+                    + "SSRC=" + pkt.getSSRCAsLong());
                 retransmitPlain = true;
             }
             else
@@ -265,8 +266,6 @@ public class RtxTransformer
 
         if (retransmitPlain)
         {
-            MediaStream mediaStream = channel.getStream();
-
             if (mediaStream != null)
             {
                 try
@@ -286,8 +285,7 @@ public class RtxTransformer
 
     /**
      * Encapsulates {@code pkt} in the RTX format, using {@code rtxSsrc} as its
-     * SSRC, and transmits it to {@link #channel} by injecting it in the
-     * {@code MediaStream}.
+     * SSRC, and injects it in the {@code MediaStream}.
      * @param pkt the packet to transmit.
      * @param rtxSsrc the SSRC for the RTX stream.
      * @param after the {@code TransformEngine} in the chain of
@@ -319,23 +317,31 @@ public class RtxTransformer
 
         // Copy the payload.
         System.arraycopy(buf, off + headerLength,
-                         newBuf, headerLength + 2,
-                         payloadLength );
+            newBuf, headerLength + 2,
+            payloadLength );
 
-        MediaStream mediaStream = channel.getStream();
         if (mediaStream != null)
         {
+            RtpCodecParameters mainCodec = mediaStream
+                .getReceiveRtpParameters()
+                .getRtpCodecParameters(Constants.VP8);
+
             rtxPkt.setSSRC((int) rtxSsrc);
-            rtxPkt.setPayloadType(channel.getRtxPayloadType());
+            rtxPkt.setPayloadType(mediaStream
+                .getReceiveRtpParameters()
+                .getRtpEncodingParameters(mainCodec.getPayloadType())
+                .getRtx()
+                .getPayloadType());
+
             // Only call getNextRtxSequenceNumber() when we're sure we're going
             // to transmit a packet, because it consumes a sequence number.
             rtxPkt.setSequenceNumber(getNextRtxSequenceNumber(rtxSsrc));
             try
             {
                 mediaStream.injectPacket(
-                        rtxPkt,
+                    rtxPkt,
                         /* data */ true,
-                        after);
+                    after);
             }
             catch (TransmissionFailedException tfe)
             {

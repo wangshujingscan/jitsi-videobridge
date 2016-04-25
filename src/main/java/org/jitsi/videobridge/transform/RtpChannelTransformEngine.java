@@ -95,7 +95,7 @@ public class RtpChannelTransformEngine
             redFilter = new REDFilterTransformEngine(RED_PAYLOAD_TYPE);
             transformerList.add(redFilter);
 
-            rtxTransformer = new RtxTransformer(channel);
+            rtxTransformer = new RtxTransformer(channel.getStream());
             transformerList.add(rtxTransformer);
         }
         else

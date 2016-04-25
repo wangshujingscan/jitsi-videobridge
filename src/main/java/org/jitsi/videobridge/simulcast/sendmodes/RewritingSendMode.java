@@ -76,6 +76,12 @@ public class RewritingSendMode
 
         State oldState = this.state;
 
+        if (oldState == null)
+        {
+            logger.warn("Dropping a packet because simulcast is not ready.");
+            return false;
+        }
+
         SimulcastStream next = oldState.getNext();
 
         // Protection against key frame packet re-ordering.
